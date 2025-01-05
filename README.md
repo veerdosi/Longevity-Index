@@ -19,26 +19,11 @@ A sophisticated tool that calculates a company's long-term sustainability and re
 - Visual representation of scores with progress bars
 - Integration with Financial Modeling Prep API for real market data
 
-## Tech Stack
-
-- **Frontend:**
-
-  - React + TypeScript
-  - Tailwind CSS
-  - shadcn/ui components
-  - Lucide React icons
-
-- **Backend:**
-  - Python FastAPI
-  - Financial Modeling Prep API integration
-  - Async data processing
-  - Error handling and rate limiting
-
 ## Getting Started
 
 ### Prerequisites
 
-- Node.js 16+
+- React 18+
 - Python 3.8+
 - Financial Modeling Prep API key
 
