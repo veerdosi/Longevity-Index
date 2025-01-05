@@ -4,13 +4,24 @@ import json
 import requests
 import logging
 import asyncio
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
+import re
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class CompanyData(BaseModel):
     symbol: str
+
+    @validator('symbol')
+    def validate_symbol(cls, v):
+        if not isinstance(v, str):
+            raise ValueError('Symbol must be a string')
+        if not v.strip():
+            raise ValueError('Symbol cannot be empty')
+        if not re.match(r'^[A-Z]{1,5}$', v):
+            raise ValueError('Symbol must be 1-5 uppercase letters')
+        return v.strip()
 
 class LongevityIndex:
     def __init__(self):
@@ -473,16 +484,8 @@ def handler(request):
         body = json.loads(request.get("body", "{}"))
         company_data = CompanyData(**body)
 
-        # Use asyncio to run functions
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            # Fetch company data
-            company_info = loop.run_until_complete(
-                calculate_company_metrics(company_data.symbol, api_key)
-            )
-        finally:
-            loop.close()
+        # Fetch company data (removed asyncio)
+        company_info = calculate_company_metrics(company_data.symbol, api_key)
 
         # Initialize calculator and compute scores
         calculator = LongevityIndex()

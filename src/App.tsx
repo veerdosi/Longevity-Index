@@ -37,14 +37,16 @@ function App() {
         body: JSON.stringify({ symbol: symbol.toUpperCase() }),
       });
 
+      const data = await response.json();
+      
       if (!response.ok) {
-        throw new Error('Failed to calculate score');
+        throw new Error(data.error || 'Failed to calculate score');
       }
 
-      const data = await response.json();
       setScores(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
+      console.error('Error details:', err);
+      setError(err instanceof Error ? err.message : 'An error occurred while calculating the score');
     } finally {
       setLoading(false);
     }
