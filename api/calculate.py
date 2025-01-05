@@ -1,139 +1,99 @@
-from http.server import BaseHTTPRequestHandler
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-import json
-import os
-import requests
 from typing import Dict, Any, List
+import os
+import json
+import requests
 import logging
 import asyncio
+from pydantic import BaseModel
 
-app = FastAPI()
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-class CompanyData(BaseModel):
-    symbol: str
-
-async def fetch_peer_data(peer: str, api_key: str) -> Dict[str, Any]:
-    """Fetch financial data for a peer company"""
+def handler(request):
+    """Main handler for Vercel serverless function"""
     try:
-        base_url = "https://financialmodelingprep.com/api/v3"
-        endpoints = {
-            'metrics': f"/key-metrics-ttm/{peer}",
-            'ratios': f"/ratios-ttm/{peer}"
-        }
-        
-        peer_data = {}
-        for endpoint_name, endpoint in endpoints.items():
-            response = requests.get(
-                f"{base_url}{endpoint}",
-                params={'apikey': api_key},
-                timeout=5
-            )
-            response.raise_for_status()
-            data = response.json()
-            if isinstance(data, list) and data:
-                peer_data.update(data[0])
-                
-        return peer_data
-    except Exception as e:
-        logger.warning(f"Error fetching peer data for {peer}: {str(e)}")
-        return {}
-
-async def fetch_industry_averages(peers: List[str], api_key: str) -> Dict[str, float]:
-    """Fetch and calculate industry averages from peer companies"""
-    industry_data = {
-        'industryProfitMargin': [],
-        'industryRevenueGrowth': [],
-        'industryAssetTurnover': [],
-        'industryOperatingMargin': [],
-        'industryRDIntensity': []
-    }
-    
-    # Create tasks for all peer data fetches
-    tasks = [fetch_peer_data(peer, api_key) for peer in peers[:5]]
-    peer_responses = await asyncio.gather(*tasks, return_exceptions=True)
-    
-    for response in peer_responses:
-        if isinstance(response, Dict):  # Skip any failed requests
-            for metric in industry_data.keys():
-                base_metric = metric.replace('industry', '').lower()
-                if base_metric in response:
-                    industry_data[metric].append(response[base_metric])
-
-    # Calculate averages
-    return {
-        metric: sum(values) / len(values) if values else None 
-        for metric, values in industry_data.items()
-    }
-
-def handle_request(request):
-    try:
-        if request.get("method", "") == "OPTIONS":
+        # Handle CORS preflight
+        if request.get("method") == "OPTIONS":
             return {
                 "statusCode": 200,
                 "headers": {
                     "Access-Control-Allow-Origin": "*",
                     "Access-Control-Allow-Methods": "POST, OPTIONS",
-                    "Access-Control-Allow-Headers": "Content-Type",
-                },
-                "body": ""
+                    "Access-Control-Allow-Headers": "Content-Type"
+                }
             }
 
-        # Get API key from environment variable
+        # Get API key from environment
         api_key = os.environ.get('FINANCIAL_API_KEY')
         if not api_key:
             return {
                 "statusCode": 500,
-                "headers": {
-                    "Access-Control-Allow-Origin": "*",
-                    "Content-Type": "application/json"
-                },
-                "body": json.dumps({"error": "API key not configured"})
+                "body": json.dumps({"error": "API key not configured"}),
+                "headers": {"Access-Control-Allow-Origin": "*"}
             }
 
-        # Get request body
+        # Parse and validate request body
         body = json.loads(request.get("body", "{}"))
         company_data = CompanyData(**body)
-        
-        # Initialize calculator
+
+        # Fetch company data including peers and industry averages
+        try:
+            company_info = calculate_company_metrics(company_data.symbol, api_key)
+        except Exception as e:
+            return {
+                "statusCode": 500,
+                "body": json.dumps({"error": str(e)}),
+                "headers": {"Access-Control-Allow-Origin": "*"}
+            }
+
+        # Initialize calculator and compute scores
         calculator = LongevityIndex()
         
-        # Fetch data and calculate
-        result = asyncio.run(calculate_longevity(company_data))
-        
-        return {
-            "statusCode": 200,
-            "headers": {
-                "Access-Control-Allow-Origin": "*",
-                "Content-Type": "application/json"
-            },
-            "body": json.dumps(result)
-        }
-        
-    except Exception as e:
-        return {
-            "statusCode": 500,
-            "headers": {
-                "Access-Control-Allow-Origin": "*",
-                "Content-Type": "application/json"
-            },
-            "body": json.dumps({"error": str(e)})
+        financial_health = calculator.calculate_financial_health(company_info)
+        market_position = calculator.calculate_market_position(company_info)
+        operational_efficiency = calculator.calculate_operational_efficiency(company_info)
+        corporate_structure = calculator.calculate_corporate_structure(company_info)
+        innovation_adaptability = calculator.calculate_innovation_adaptability(company_info)
+        governance_risk = calculator.calculate_governance_risk(company_info)
+
+        # Calculate final score
+        final_score = (
+            financial_health * calculator.weights['financial_health'] +
+            market_position * calculator.weights['market_position'] +
+            operational_efficiency * calculator.weights['operational_efficiency'] +
+            corporate_structure * calculator.weights['corporate_structure'] +
+            innovation_adaptability * calculator.weights['innovation_adaptability'] +
+            governance_risk * calculator.weights['governance_risk']
+        )
+
+        result = {
+            "score": round(final_score, 2),
+            "components": {
+                "financial_health": round(financial_health, 2),
+                "market_position": round(market_position, 2),
+                "operational_efficiency": round(operational_efficiency, 2),
+                "corporate_structure": round(corporate_structure, 2),
+                "innovation_adaptability": round(innovation_adaptability, 2),
+                "governance_risk": round(governance_risk, 2)
+            }
         }
 
-def handler(request, context):
-    return handle_request(request)
+        return {
+            "statusCode": 200,
+            "body": json.dumps(result),
+            "headers": {
+                "Access-Control-Allow-Origin": "*",
+                "Content-Type": "application/json"
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Error processing request: {str(e)}")
+        return {
+            "statusCode": 500,
+            "body": json.dumps({"error": str(e)}),
+            "headers": {"Access-Control-Allow-Origin": "*"}
+        }
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class CompanyData(BaseModel):
     symbol: str
@@ -203,7 +163,7 @@ class LongevityIndex:
 
         except Exception as e:
             logger.error(f"Error calculating financial health: {str(e)}")
-            raise HTTPException(status_code=500, detail="Error calculating financial health")
+            return 0.0
 
     def calculate_market_position(self, data: Dict[str, Any]) -> float:
         try:
@@ -245,7 +205,7 @@ class LongevityIndex:
 
         except Exception as e:
             logger.error(f"Error calculating market position: {str(e)}")
-            raise HTTPException(status_code=500, detail="Error calculating market position")
+            return 0.0
 
     def calculate_operational_efficiency(self, data: Dict[str, Any]) -> float:
         try:
@@ -284,7 +244,7 @@ class LongevityIndex:
 
         except Exception as e:
             logger.error(f"Error calculating operational efficiency: {str(e)}")
-            raise HTTPException(status_code=500, detail="Error calculating operational efficiency")
+            return 0.0
 
     def calculate_corporate_structure(self, data: Dict[str, Any]) -> float:
         try:
@@ -328,7 +288,7 @@ class LongevityIndex:
 
         except Exception as e:
             logger.error(f"Error calculating corporate structure: {str(e)}")
-            raise HTTPException(status_code=500, detail="Error calculating corporate structure")
+            return 0.0
 
     def calculate_innovation_adaptability(self, data: Dict[str, Any]) -> float:
         try:
@@ -369,7 +329,7 @@ class LongevityIndex:
 
         except Exception as e:
             logger.error(f"Error calculating innovation adaptability: {str(e)}")
-            raise HTTPException(status_code=500, detail="Error calculating innovation adaptability")
+            return 0.0
 
     def calculate_governance_risk(self, data: Dict[str, Any]) -> float:
         try:
@@ -412,7 +372,7 @@ class LongevityIndex:
 
         except Exception as e:
             logger.error(f"Error calculating governance risk: {str(e)}")
-            raise HTTPException(status_code=500, detail="Error calculating governance risk")
+            return 0.0
 
     def _normalize_metric(self, value: float, target: float, excellent: float = None, inverse: bool = False) -> float:
         try:
@@ -481,64 +441,138 @@ class LongevityIndex:
         except Exception:
             return 0.0
 
-@app.post("/calculate-longevity")
-async def calculate_longevity(company_data: CompanyData):
+def fetch_peer_data(peer: str, api_key: str) -> Dict[str, Any]:
+    """Fetch financial data for a peer company"""
     try:
-        # Get your API key from environment variable
-        api_key = "Aq8GhWWZzHihOcGBMyiy7yiFkvvx7ZEl"
-        if not api_key:
-            raise HTTPException(status_code=500, detail="API key not configured")
-
-        # Fetch financial data from external API
         base_url = "https://financialmodelingprep.com/api/v3"
         endpoints = {
-            'profile': f"/profile/{company_data.symbol}",
-            'metrics': f"/key-metrics-ttm/{company_data.symbol}",
-            'ratios': f"/ratios-ttm/{company_data.symbol}",
-            'growth': f"/financial-growth/{company_data.symbol}",
-            'industry': f"/stock-peers/{company_data.symbol}"  # For industry comparisons
+            'metrics': f"/key-metrics-ttm/{peer}",
+            'ratios': f"/ratios-ttm/{peer}"
+        }
+        
+        peer_data = {}
+        for endpoint_name, endpoint in endpoints.items():
+            response = requests.get(
+                f"{base_url}{endpoint}",
+                params={'apikey': api_key},
+                timeout=5
+            )
+            response.raise_for_status()
+            data = response.json()
+            if isinstance(data, list) and data:
+                peer_data.update(data[0])
+                
+        return peer_data
+    except Exception as e:
+        logger.warning(f"Error fetching peer data for {peer}: {str(e)}")
+        return {}
+
+def fetch_industry_averages(peers: List[str], api_key: str) -> Dict[str, float]:
+    """Fetch and calculate industry averages from peer companies"""
+    industry_data = {
+        'industryProfitMargin': [],
+        'industryRevenueGrowth': [],
+        'industryAssetTurnover': [],
+        'industryOperatingMargin': [],
+        'industryRDIntensity': []
+    }
+    
+    for peer in peers[:5]:  # Limit to 5 peers to avoid rate limiting
+        try:
+            response = fetch_peer_data(peer, api_key)
+            for metric in industry_data.keys():
+                base_metric = metric.replace('industry', '').lower()
+                if base_metric in response:
+                    industry_data[metric].append(response[base_metric])
+        except Exception:
+            continue
+
+    # Calculate averages
+    return {
+        metric: sum(values) / len(values) if values else None 
+        for metric, values in industry_data.items()
+    }
+
+def calculate_company_metrics(symbol: str, api_key: str) -> Dict[str, Any]:
+    try:
+        base_url = "https://financialmodelingprep.com/api/v3"
+        endpoints = {
+            'profile': f"/profile/{symbol}",
+            'metrics': f"/key-metrics-ttm/{symbol}",
+            'ratios': f"/ratios-ttm/{symbol}",
+            'growth': f"/financial-growth/{symbol}",
+            'peers': f"/stock-peers/{symbol}"
         }
 
         company_info = {}
         for endpoint_name, endpoint in endpoints.items():
-            try:
-                response = requests.get(
-                    f"{base_url}{endpoint}",
-                    params={'apikey': api_key},
-                    timeout=10  # Add timeout
-                )
-                
-                # Check for rate limiting
-                if response.status_code == 429:
-                    raise HTTPException(status_code=429, detail="API rate limit exceeded. Please try again later.")
-                
-                response.raise_for_status()
-                data = response.json()
-                
-                if isinstance(data, list) and data:
+            response = requests.get(
+                f"{base_url}{endpoint}",
+                params={'apikey': api_key},
+                timeout=10
+            )
+            response.raise_for_status()
+            data = response.json()
+            
+            if isinstance(data, list) and data:
+                if endpoint_name == 'peers':
+                    company_info['peers'] = data
+                else:
                     company_info.update(data[0])
-                elif isinstance(data, dict):
-                    company_info.update(data)
-                    
-            except requests.exceptions.Timeout:
-                raise HTTPException(status_code=504, detail=f"Timeout while fetching {endpoint_name} data")
-            except requests.exceptions.RequestException as e:
-                logger.error(f"Error fetching {endpoint_name} data: {str(e)}")
-                if endpoint_name == 'profile':  # Profile data is essential
-                    raise HTTPException(status_code=500, detail=f"Error fetching company data: {str(e)}")
+            elif isinstance(data, dict):
+                company_info.update(data)
 
-        # Calculate industry averages if available
+        # Fetch industry averages if peers are available
         if 'peers' in company_info:
-            try:
-                industry_data = await fetch_industry_averages(company_info['peers'], api_key)
-                company_info.update(industry_data)
-            except Exception as e:
-                logger.warning(f"Could not fetch industry averages: {str(e)}")
+            industry_averages = fetch_industry_averages(company_info['peers'], api_key)
+            company_info.update(industry_averages)
 
-        # Initialize LongevityIndex calculator
+        return company_info
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error fetching company data: {str(e)}")
+        raise Exception(f"Failed to fetch company data: {str(e)}")
+
+def handler(request):
+    """Main handler for Vercel serverless function"""
+    try:
+        # Handle CORS preflight
+        if request.get("method") == "OPTIONS":
+            return {
+                "statusCode": 200,
+                "headers": {
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type"
+                }
+            }
+
+        # Get API key from environment
+        api_key = os.environ.get('FINANCIAL_API_KEY')
+        if not api_key:
+            return {
+                "statusCode": 500,
+                "body": json.dumps({"error": "API key not configured"}),
+                "headers": {"Access-Control-Allow-Origin": "*"}
+            }
+
+        # Parse request body
+        body = json.loads(request.get("body", "{}"))
+        company_data = CompanyData(**body)
+
+        # Use asyncio to run functions
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            # Fetch company data
+            company_info = loop.run_until_complete(
+                calculate_company_metrics(company_data.symbol, api_key)
+            )
+        finally:
+            loop.close()
+
+        # Initialize calculator and compute scores
         calculator = LongevityIndex()
-
-        # Calculate individual components
+        
         financial_health = calculator.calculate_financial_health(company_info)
         market_position = calculator.calculate_market_position(company_info)
         operational_efficiency = calculator.calculate_operational_efficiency(company_info)
@@ -556,8 +590,8 @@ async def calculate_longevity(company_data: CompanyData):
             governance_risk * calculator.weights['governance_risk']
         )
 
-        return {
-            "score": round(final_score, 2),  # Return just the numerical score
+        result = {
+            "score": round(final_score, 2),
             "components": {
                 "financial_health": round(financial_health, 2),
                 "market_position": round(market_position, 2),
@@ -568,33 +602,19 @@ async def calculate_longevity(company_data: CompanyData):
             }
         }
 
-    except HTTPException:
-        raise
+        return {
+            "statusCode": 200,
+            "body": json.dumps(result),
+            "headers": {
+                "Access-Control-Allow-Origin": "*",
+                "Content-Type": "application/json"
+            }
+        }
+
     except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
-
-async def fetch_industry_averages(peers: list, api_key: str) -> Dict[str, float]:
-    """Fetch and calculate industry averages from peer companies"""
-    industry_data = {
-        'industryProfitMargin': [],
-        'industryRevenueGrowth': [],
-        'industryAssetTurnover': [],
-        'industryOperatingMargin': [],
-        'industryRDIntensity': []
-    }
-    
-    for peer in peers[:5]:  # Limit to 5 peers to avoid rate limiting
-        try:
-            response = await fetch_peer_data(peer, api_key)
-            for metric in industry_data.keys():
-                if metric.replace('industry', '').lower() in response:
-                    industry_data[metric].append(response[metric.replace('industry', '').lower()])
-        except Exception:
-            continue
-
-    # Calculate averages
-    return {
-        metric: sum(values) / len(values) if values else None 
-        for metric, values in industry_data.items()
-    }
+        logger.error(f"Error processing request: {str(e)}")
+        return {
+            "statusCode": 500,
+            "body": json.dumps({"error": str(e)}),
+            "headers": {"Access-Control-Allow-Origin": "*"}
+        }
