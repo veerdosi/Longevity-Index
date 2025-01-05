@@ -457,11 +457,14 @@ def calculate_company_metrics(symbol: str, api_key: str) -> Dict[str, Any]:
         logger.error(f"Error fetching company data: {str(e)}")
         raise Exception(f"Failed to fetch company data: {str(e)}")
 
-def handler(request):
+def handler(event, context):
     """Main handler for Vercel serverless function"""
     try:
+        # Extract method and body from event
+        http_method = event.get("httpMethod", "")
+        
         # Handle CORS preflight
-        if request.get("method") == "OPTIONS":
+        if http_method == "OPTIONS":
             return {
                 "statusCode": 200,
                 "headers": {
@@ -481,10 +484,22 @@ def handler(request):
             }
 
         # Parse request body
-        body = json.loads(request.get("body", "{}"))
-        company_data = CompanyData(**body)
+        request_body = event.get("body", "{}")
+        if isinstance(request_body, str):
+            body = json.loads(request_body)
+        else:
+            body = request_body
+            
+        try:
+            company_data = CompanyData(**body)
+        except ValueError as ve:
+            return {
+                "statusCode": 400,
+                "body": json.dumps({"error": str(ve)}),
+                "headers": {"Access-Control-Allow-Origin": "*"}
+            }
 
-        # Fetch company data (removed asyncio)
+        # Fetch company data
         company_info = calculate_company_metrics(company_data.symbol, api_key)
 
         # Initialize calculator and compute scores

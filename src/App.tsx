@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Info } from 'lucide-react';
 import './App.css';
 
 interface ComponentScores {
@@ -67,6 +67,25 @@ function App() {
           and operational metrics.
         </p>
 
+        <div className="info-box" style={{ 
+          backgroundColor: '#f0f9ff', 
+          borderLeft: '4px solid #3b82f6',
+          padding: '1rem',
+          marginBottom: '1.5rem',
+          display: 'flex',
+          gap: '12px',
+          alignItems: 'flex-start'
+        }}>
+          <Info className="h-5 w-5" style={{ color: '#3b82f6', flexShrink: 0, marginTop: '2px' }} />
+          <p style={{ fontSize: '0.875rem', color: '#1e40af', margin: 0 }}>
+            The Longevity Index evaluates companies across six key dimensions: Financial Health (30%), 
+            Market Position (20%), Operational Efficiency (15%), Corporate Structure (15%), 
+            Innovation & Adaptability (10%), and Governance & Risk (10%). Each component is calculated 
+            using real-time market data and industry benchmarks to provide a comprehensive assessment 
+            of a company's long-term sustainability.
+          </p>
+        </div>
+
         <div className="input-group">
           <input
             type="text"
@@ -80,7 +99,7 @@ function App() {
           >
             {loading ? (
               <>
-                <Loader2 className="animate-spin" />
+                <Loader2 className="spinner" />
                 Calculating...
               </>
             ) : (
@@ -111,19 +130,23 @@ function App() {
                     <span>{key.replace(/_/g, ' ')}</span>
                     <span>{value}</span>
                   </div>
-                  <div className="progress-bar">
-                    <div
-                      style={{
-                        '--progress': `${value}%`,
-                        '--color': getScoreColor(value),
-                      } as React.CSSProperties}
-                    />
-                  </div>
+                  <div className="progress-bar" style={{
+                    '--progress': `${value}%`,
+                    '--color': getScoreColor(value)
+                  } as React.CSSProperties} />
                 </div>
               ))}
             </div>
           </div>
         )}
+
+        <div style={{ 
+          textAlign: 'center', 
+          marginTop: '2rem',
+          color: '#666'
+        }}>
+          Made with ❤️ by Veer Dosi © {new Date().getFullYear()}
+        </div>
       </div>
     </div>
   );
